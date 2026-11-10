@@ -76,8 +76,12 @@ function parseSchedule(text){
     .replace(/([年月日\/:.-])\s+(?=\d)/g,'$1');
   const lodging=/酒店|宾馆|饭店|客栈|旅馆|入住|退房|离店|房型|预订号/.test(normalized);
   const trip=lodging||/出差|外出|有空去|去吗/.test(normalized);
-  const dateMatches=[...normalized.matchAll(/(?:\d{4}[年\/-])?\d{1,2}[月\/-]\d{1,2}日?/g)].map(match=>match[0]);
-  const dateText=(normalized.match(/(?:入住|到店|入店)[^\d]{0,8}((?:\d{4}[年\/-])?\d{1,2}[月\/-]\d{1,2}日?)/)||[])[1]||dateMatches[0]||'';
+  const datePattern='(?:\\d{4}[年\\/-])?\\d{1,2}[月\\/-]\\d{1,2}日?';
+  const dateMatches=[...normalized.matchAll(new RegExp(datePattern,'g'))];
+  const lodgingDate=(normalized.match(new RegExp('(?:入住|到店|入店)[^\\d]{0,12}('+datePattern+')'))||[])[1]||'';
+  const labeledDate=(normalized.match(new RegExp('(?:会\\s*议\\s*(?:时\\s*间|日\\s*期)|活\\s*动\\s*(?:时\\s*间|日\\s*期))[^\\d]{0,20}('+datePattern+')','i'))||[])[1]||'';
+  const ordinaryDate=(dateMatches.find(match=>!/(?:expiration|expiry|有效期|过期)[^\n]{0,30}$/i.test(normalized.slice(Math.max(0,match.index-40),match.index)))||dateMatches[0])?.[0]||'';
+  const dateText=lodgingDate||labeledDate||ordinaryDate;
   const date=parseDate(dateText);
   const afternoon=/下午/.test(normalized);
   const ranges=[...normalized.matchAll(/(\d{1,2}(?:点|:)\d{0,2})\s*(?:到|至|-)\s*(\d{1,2}(?:点|:)\d{0,2})/g)];
@@ -98,12 +102,12 @@ function parseSchedule(text){
   const role=lodging?'':(normalized.match(/讲者|讲课|主持|讨论|汇报|参会/)||[''])[0].replace('讲课','讲者');
   const url=(normalized.match(/https?:\/\/[^\s)]+/)||[''])[0];
   const people=(normalized.match(/(?:主席|相关人员)\s*[:：]?\s*([^\n]+)/)||[])[1]||'';
-  const checkout=(normalized.match(/(?:退房|离店)[^\d]{0,8}((?:\d{4}[年\/-])?\d{1,2}[月\/-]\d{1,2}日?)/)||[])[1]||dateMatches[1]||'';
+  const checkout=(normalized.match(new RegExp('(?:退房|离店)[^\\d]{0,12}('+datePattern+')'))||[])[1]||dateMatches[1]?.[0]||'';
   const room=(normalized.match(/(?:房型|房间类型)\s*:\s*([^\n，,。]+)/)||[])[1]||'';
   const booking=(normalized.match(/(?:预订号|订单号|确认号)\s*:\s*([^\s\n，,]+)/)||[])[1]||'';
   const notes=lodging?[hotelAddress&&`酒店地址：${hotelAddress.trim()}`,checkout&&`退房/离店：${checkout}`,room&&`房型：${room.trim()}`,booking&&`预订号：${booking}`].filter(Boolean).join('\n'):'';
   const status=/预订成功|成功预订|已确认|确认成功|已预订/.test(normalized)?'已确认':'待确认';
-  return {id:uid(),title,date:date?localDate(date):localDate(selectedDate),start,end,type:trip?'出差/外出':'会议',status,location:location.trim(),role,people:people.trim(),url,notes,source:text,reminders:[1440,60,10],attachments:[],createdAt:new Date().toISOString()};
+  return {id:uid(),title,date:date?localDate(date):'',start,end,type:trip?'出差/外出':'会议',status,location:location.trim(),role,people:people.trim(),url,notes,source:text,reminders:[1440,60,10],attachments:[],createdAt:new Date().toISOString()};
 }
 
 function render(){
@@ -145,7 +149,7 @@ function resetEditor(){
   fillFields({title:'',date:localDate(selectedDate),start:'',end:'',type:'会议',status:'待确认',location:'',role:'',url:'',people:'',notes:'',reminders:[1440,60,10],attachments:[]});
 }
 function fillFields(event){
-  $('#titleInput').value=event.title||'';$('#dateInput').value=event.date||localDate(selectedDate);$('#startInput').value=event.start||'';$('#endInput').value=event.end||'';$('#typeInput').value=event.type||'会议';$('#statusInput').value=event.status||'待确认';$('#locationInput').value=event.location||'';$('#roleInput').value=event.role||'';$('#urlInput').value=event.url||'';$('#peopleInput').value=event.people||'';$('#notesInput').value=event.notes||'';$('#remindersInput').value=(event.reminders||[]).join(',');renderAttachments(event.attachments||[]);
+  $('#titleInput').value=event.title||'';$('#dateInput').value=event.date??localDate(selectedDate);$('#startInput').value=event.start||'';$('#endInput').value=event.end||'';$('#typeInput').value=event.type||'会议';$('#statusInput').value=event.status||'待确认';$('#locationInput').value=event.location||'';$('#roleInput').value=event.role||'';$('#urlInput').value=event.url||'';$('#peopleInput').value=event.people||'';$('#notesInput').value=event.notes||'';$('#remindersInput').value=(event.reminders||[]).join(',');renderAttachments(event.attachments||[]);
 }
 function openEditor(event=null){
   resetEditor();
@@ -174,7 +178,7 @@ async function recognizeFiles(files){
 function applyRecognizedText(text,successMessage='已识别，请检查并修改后保存。'){
   const value=String(text||'').trim();
   if(!value){$('#ocrStatus').textContent='请先粘贴文字或选择截图。';return false}
-  try{const draft=parseSchedule(value);draft.attachments=pendingFiles.map(file=>file.name);fillFields(draft);$('#ocrStatus').textContent=successMessage;$('#fields').scrollIntoView({behavior:'smooth',block:'start'});return true}
+  try{const draft=parseSchedule(value);draft.attachments=pendingFiles.map(file=>file.name);fillFields(draft);$('#ocrStatus').textContent=draft.date?successMessage:'未能确定日期，请手动选择日期后再保存。';$('#fields').scrollIntoView({behavior:'smooth',block:'start'});return true}
   catch(error){console.error(error);$('#ocrStatus').textContent='识别出错，请稍后重试或手动填写。';return false}
 }
 function eventFromForm(existing){
