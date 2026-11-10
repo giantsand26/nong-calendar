@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#f6f5fb">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+  <title>农的日程</title>
+</head>
+<body>
+  <main class="app">
+    <header class="topbar">
+      <div><h1>我的日程</h1><p id="todayLabel"></p></div>
+      <button id="addBtn" class="icon-button" aria-label="新建日程">＋</button>
+    </header>
+
+    <nav class="view-tabs" aria-label="日历视图">
+      <button data-view="month" class="active">月</button>
+      <button data-view="week">周</button>
+      <button data-view="day">日</button>
+    </nav>
+
+    <section class="calendar-card">
+      <div class="calendar-head">
+        <button id="previousBtn" aria-label="上一段">‹</button>
+        <strong id="periodTitle"></strong>
+        <button id="nextBtn" aria-label="下一段">›</button>
+      </div>
+      <div id="calendarView"></div>
+    </section>
+
+    <section class="day-panel">
+      <div class="section-title">
+        <h2 id="selectionTitle"></h2>
+        <button id="importBtn" class="primary">导入</button>
+      </div>
+      <div id="eventList"></div>
+    </section>
+
+    <section class="tools">
+      <button id="exportBtn" class="text-button">导出备份</button>
+      <label class="text-button">恢复备份<input id="restoreInput" type="file" accept="application/json" hidden></label>
+    </section>
+  </main>
+
+  <dialog id="editorDialog">
+    <form method="dialog" id="editorForm">
+      <header class="dialog-head"><h2 id="editorTitle">导入日程</h2><button id="closeEditorBtn" type="button" class="close-button">关闭</button></header>
+      <section id="importSection">
+        <textarea id="sourceText" placeholder="粘贴微信聊天内容，或选择微信截图"></textarea>
+        <div class="actions">
+          <button id="photoBtn" type="button" class="secondary">选择截图/附件</button>
+          <input id="photoInput" type="file" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx" multiple hidden>
+          <button id="recognizeBtn" type="button" class="primary">识别内容</button>
+        </div>
+        <p id="ocrStatus" class="hint">文字和附件只保存在此设备浏览器中。</p>
+      </section>
+      <section id="fields" class="fields">
+        <label>标题<input id="titleInput" required></label>
+        <div class="two-column"><label>日期<input id="dateInput" type="date" required></label><label>状态<select id="statusInput"><option>待确认</option><option>已确认</option><option>已取消</option></select></label></div>
+        <div class="two-column"><label>开始时间<input id="startInput" type="time"></label><label>结束时间<input id="endInput" type="time"></label></div>
+        <div class="two-column"><label>类型<select id="typeInput"><option>会议</option><option>出差/外出</option><option>其他</option></select></label><label>我的角色<input id="roleInput" placeholder="讲者、讨论、主持"></label></div>
+        <label>地点<input id="locationInput"></label>
+        <label>会议链接<input id="urlInput" type="url"></label>
+        <label>相关人员<input id="peopleInput"></label>
+        <label>提醒（提前分钟，逗号分隔）<input id="remindersInput" placeholder="1440,60,10"></label>
+        <label>备注<textarea id="notesInput"></textarea></label>
+        <div id="attachmentList" class="attachments"></div>
+      </section>
+      <footer class="dialog-actions"><button id="deleteBtn" type="button" class="danger hidden">删除</button><button id="saveBtn" value="default" class="primary">保存</button></footer>
+    </form>
+  </dialog>
+
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
