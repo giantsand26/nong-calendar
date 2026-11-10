@@ -57,8 +57,10 @@ function normalizeChineseTime(raw, isAfternoon=false){
 }
 function parseSchedule(text){
   const normalized=text.replace(/：/g,':').replace(/[–—]/g,'-');
-  const trip=/出差|外出|有空去|去吗/.test(normalized);
-  const dateText=(normalized.match(/(?:\d{4}[年\/-])?\d{1,2}[月\/-]\d{1,2}日?/)||[''])[0];
+  const lodging=/酒店|宾馆|饭店|客栈|旅馆|入住|退房|离店|房型|预订号/.test(normalized);
+  const trip=lodging||/出差|外出|有空去|去吗/.test(normalized);
+  const dateMatches=[...normalized.matchAll(/(?:\d{4}[年\/-])?\d{1,2}[月\/-]\d{1,2}日?/g)].map(match=>match[0]);
+  const dateText=(normalized.match(/(?:入住|到店|入店)[^\d]{0,8}((?:\d{4}[年\/-])?\d{1,2}[月\/-]\d{1,2}日?)/)||[])[1]||dateMatches[0]||'';
   const date=parseDate(dateText);
   const afternoon=/下午/.test(normalized);
   const ranges=[...normalized.matchAll(/(\d{1,2}(?:点|:)\d{0,2})\s*(?:到|至|-)\s*(\d{1,2}(?:点|:)\d{0,2})/g)];
@@ -66,15 +68,25 @@ function parseSchedule(text){
   const start=personal?normalizeChineseTime(personal[1],afternoon):'';
   const end=personal?normalizeChineseTime(personal[2],afternoon):'';
   const topic=(normalized.match(/会议主题\s*:\s*([^\n]+)/)||[])[1];
-  let title=topic?.trim()||(trip?'出差/外出安排':'待填写日程');
+  const labeledHotel=(normalized.match(/(?:酒店名称|入住酒店|住宿地点) *:\s*([^\n，,。]{2,50})/)||[])[1]||'';
+  const genericHotel=(normalized.match(/([^\n，,。；;]{2,50}?(?:酒店|宾馆|饭店|客栈|旅馆|度假村|服务公寓))/)||[])[1]||'';
+  const hotelName=(labeledHotel||genericHotel).replace(/^.*?(?:成功预订|已预订|预订|入住) */,'').replace(/^(?:您好|您) */,'').trim();
+  let title=topic?.trim()||(lodging?(hotelName||'酒店住宿'):trip?'出差/外出安排':'待填写日程');
   if(!topic){const named=(normalized.match(/(?:有一个|一个)([^，。\n]*?会议)/)||[])[1];if(named)title=named.trim()}
   let location=(normalized.match(/(?:会议地点|地点)\s*:\s*([^\n]+)/)||[])[1]||'';
+  const hotelAddress=lodging?((normalized.match(/(?:酒店地址|地址)\s*:\s*([^\n；;,，。]+)/)||[])[1]||''):'';
+  if(lodging)location=hotelName||hotelAddress||location;
   if(!location){location=(normalized.match(/在([^，。\n]*?)(?:的会议|那边|有一个|开会)/)||[])[1]||''}
   if(trip&&!location)location=(normalized.match(/(苏州|北京|上海|广州|深圳|杭州|天津|南京|成都|重庆|武汉|西安|广西)/)||[''])[0];
-  const role=(normalized.match(/讲者|讲课|主持|讨论|汇报|参会/)||[''])[0].replace('讲课','讲者');
+  const role=lodging?'':(normalized.match(/讲者|讲课|主持|讨论|汇报|参会/)||[''])[0].replace('讲课','讲者');
   const url=(normalized.match(/https?:\/\/[^\s)]+/)||[''])[0];
   const people=(normalized.match(/(?:主席|相关人员)\s*[:：]?\s*([^\n]+)/)||[])[1]||'';
-  return {id:uid(),title,date:date?localDate(date):localDate(selectedDate),start,end,type:trip?'出差/外出':'会议',status:'待确认',location:location.trim(),role,people:people.trim(),url,notes:'',source:text,reminders:[1440,60,10],attachments:[],createdAt:new Date().toISOString()};
+  const checkout=(normalized.match(/(?:退房|离店)[^\d]{0,8}((?:\d{4}[年\/-])?\d{1,2}[月\/-]\d{1,2}日?)/)||[])[1]||dateMatches[1]||'';
+  const room=(normalized.match(/(?:房型|房间类型)\s*:\s*([^\n，,。]+)/)||[])[1]||'';
+  const booking=(normalized.match(/(?:预订号|订单号|确认号)\s*:\s*([^\s\n，,]+)/)||[])[1]||'';
+  const notes=lodging?[hotelAddress&&`酒店地址：${hotelAddress.trim()}`,checkout&&`退房/离店：${checkout}`,room&&`房型：${room.trim()}`,booking&&`预订号：${booking}`].filter(Boolean).join('\n'):'';
+  const status=/预订成功|成功预订|已确认|确认成功|已预订/.test(normalized)?'已确认':'待确认';
+  return {id:uid(),title,date:date?localDate(date):localDate(selectedDate),start,end,type:trip?'出差/外出':'会议',status,location:location.trim(),role,people:people.trim(),url,notes,source:text,reminders:[1440,60,10],attachments:[],createdAt:new Date().toISOString()};
 }
 
 function render(){
