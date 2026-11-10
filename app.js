@@ -101,13 +101,14 @@ function parseSchedule(text){
   if(trip&&!location)location=(normalized.match(/(苏州|北京|上海|广州|深圳|杭州|天津|南京|成都|重庆|武汉|西安|广西)/)||[''])[0];
   const role=lodging?'':(normalized.match(/讲者|讲课|主持|讨论|汇报|参会/)||[''])[0].replace('讲课','讲者');
   const url=(normalized.match(/https?:\/\/[^\s)]+/)||[''])[0];
+  const meetingId=((normalized.match(/(?:腾讯会议|会议\s*(?:ID|号))\s*[#:]?\s*([\d-]{6,})/i)||[])[1]||'').replace(/^-|-$/g,'');
   const people=(normalized.match(/(?:主席|相关人员)\s*[:：]?\s*([^\n]+)/)||[])[1]||'';
   const checkout=(normalized.match(new RegExp('(?:退房|离店)[^\\d]{0,12}('+datePattern+')'))||[])[1]||dateMatches[1]?.[0]||'';
   const room=(normalized.match(/(?:房型|房间类型)\s*:\s*([^\n，,。]+)/)||[])[1]||'';
   const booking=(normalized.match(/(?:预订号|订单号|确认号)\s*:\s*([^\s\n，,]+)/)||[])[1]||'';
   const notes=lodging?[hotelAddress&&`酒店地址：${hotelAddress.trim()}`,checkout&&`退房/离店：${checkout}`,room&&`房型：${room.trim()}`,booking&&`预订号：${booking}`].filter(Boolean).join('\n'):'';
   const status=/预订成功|成功预订|已确认|确认成功|已预订/.test(normalized)?'已确认':'待确认';
-  return {id:uid(),title,date:date?localDate(date):'',start,end,type:trip?'出差/外出':'会议',status,location:location.trim(),role,people:people.trim(),url,notes,source:text,reminders:[1440,60,10],attachments:[],createdAt:new Date().toISOString()};
+  return {id:uid(),title,date:date?localDate(date):'',start,end,type:trip?'出差/外出':'会议',status,location:location.trim(),role,people:people.trim(),url,meetingId,notes,source:text,reminders:[1440,60,10],attachments:[],createdAt:new Date().toISOString()};
 }
 
 function render(){
@@ -123,17 +124,17 @@ function renderCalendar(){
     let html=`<div class="weekdays">${WEEKDAYS.map(day=>`<span>${day}</span>`).join('')}</div><div class="month-grid">${'<span></span>'.repeat(offset)}`;
     for(let day=1;day<=new Date(year,month+1,0).getDate();day++){
       const date=new Date(year,month,day),key=localDate(date),has=events.some(event=>event.date===key);
-      html+=`<button data-date="${key}" class="${key===localDate(selectedDate)?'selected ':''}${has?'has-event':''}">${day}</button>`;
+      html+=`<button data-date="${key}" class="${key===localDate(selectedDate)?'selected ':''}${key===localDate(new Date())?'today ':''}${has?'has-event':''}">${day}</button>`;
     }
     host.innerHTML=html+'</div>';
   } else if(viewMode==='week'){
     const monday=new Date(cursorDate);monday.setDate(monday.getDate()-((monday.getDay()+6)%7));
     const days=Array.from({length:7},(_,index)=>{const date=new Date(monday);date.setDate(monday.getDate()+index);return date});
     $('#periodTitle').textContent=`${days[0].getMonth()+1}月${days[0].getDate()}日－${days[6].getMonth()+1}月${days[6].getDate()}日`;
-    host.innerHTML=`<div class="week-grid">${days.map((date,index)=>`<button data-date="${localDate(date)}" class="${localDate(date)===localDate(selectedDate)?'selected ':''}${events.some(event=>event.date===localDate(date))?'has-event':''}"><small>周${WEEKDAYS[index]}</small>${date.getDate()}</button>`).join('')}</div>`;
+    host.innerHTML=`<div class="week-grid">${days.map((date,index)=>`<button data-date="${localDate(date)}" class="${localDate(date)===localDate(selectedDate)?'selected ':''}${localDate(date)===localDate(new Date())?'today ':''}${events.some(event=>event.date===localDate(date))?'has-event':''}"><small>周${WEEKDAYS[index]}</small>${date.getDate()}</button>`).join('')}</div>`;
   } else {
     $('#periodTitle').textContent=`${year}年${month+1}月`;
-    host.innerHTML=`<button class="day-focus" data-date="${localDate(cursorDate)}"><small>${new Intl.DateTimeFormat('zh-CN',{weekday:'long'}).format(cursorDate)}</small><br><strong>${cursorDate.getDate()}</strong></button>`;
+    host.innerHTML=`<button class="day-focus ${localDate(cursorDate)===localDate(new Date())?'today':''}" data-date="${localDate(cursorDate)}"><small>${new Intl.DateTimeFormat('zh-CN',{weekday:'long'}).format(cursorDate)}</small><br><strong>${cursorDate.getDate()}</strong></button>`;
   }
   host.querySelectorAll('[data-date]').forEach(button=>button.addEventListener('click',()=>{selectedDate=new Date(`${button.dataset.date}T12:00:00`);cursorDate=new Date(selectedDate);render()}));
 }
@@ -146,10 +147,10 @@ function renderEvents(){
 
 function resetEditor(){
   editingId=null;pendingFiles=[];$('#editorTitle').textContent='导入日程';$('#importSection').classList.remove('hidden');$('#deleteBtn').classList.add('hidden');$('#sourceText').value='';$('#ocrStatus').textContent='文字和附件只保存在此设备浏览器中。';
-  fillFields({title:'',date:localDate(selectedDate),start:'',end:'',type:'会议',status:'待确认',location:'',role:'',url:'',people:'',notes:'',reminders:[1440,60,10],attachments:[]});
+  fillFields({title:'',date:localDate(selectedDate),start:'',end:'',type:'会议',status:'待确认',location:'',role:'',url:'',meetingId:'',people:'',notes:'',reminders:[1440,60,10],attachments:[]});
 }
 function fillFields(event){
-  $('#titleInput').value=event.title||'';$('#dateInput').value=event.date??localDate(selectedDate);$('#startInput').value=event.start||'';$('#endInput').value=event.end||'';$('#typeInput').value=event.type||'会议';$('#statusInput').value=event.status||'待确认';$('#locationInput').value=event.location||'';$('#roleInput').value=event.role||'';$('#urlInput').value=event.url||'';$('#peopleInput').value=event.people||'';$('#notesInput').value=event.notes||'';$('#remindersInput').value=(event.reminders||[]).join(',');renderAttachments(event.attachments||[]);
+  $('#titleInput').value=event.title||'';$('#dateInput').value=event.date??localDate(selectedDate);$('#startInput').value=event.start||'';$('#endInput').value=event.end||'';$('#typeInput').value=event.type||'会议';$('#statusInput').value=event.status||'待确认';$('#locationInput').value=event.location||'';$('#roleInput').value=event.role||'';$('#urlInput').value=event.url||'';$('#meetingIdInput').value=event.meetingId||'';$('#peopleInput').value=event.people||'';$('#notesInput').value=event.notes||'';$('#remindersInput').value=(event.reminders||[]).join(',');renderAttachments(event.attachments||[]);
 }
 function openEditor(event=null){
   resetEditor();
@@ -182,7 +183,19 @@ function applyRecognizedText(text,successMessage='已识别，请检查并修改
   catch(error){console.error(error);$('#ocrStatus').textContent='识别出错，请稍后重试或手动填写。';return false}
 }
 function eventFromForm(existing){
-  return {...existing,id:existing?.id||uid(),title:$('#titleInput').value.trim(),date:$('#dateInput').value,start:$('#startInput').value,end:$('#endInput').value,type:$('#typeInput').value,status:$('#statusInput').value,location:$('#locationInput').value.trim(),role:$('#roleInput').value.trim(),url:$('#urlInput').value.trim(),people:$('#peopleInput').value.trim(),notes:$('#notesInput').value.trim(),source:existing?.source||$('#sourceText').value,reminders:$('#remindersInput').value.split(/[,，]/).map(Number).filter(value=>Number.isFinite(value)&&value>=0),attachments:pendingFiles.length?pendingFiles.map(file=>file.name):(existing?.attachments||[]),createdAt:existing?.createdAt||new Date().toISOString(),updatedAt:new Date().toISOString()};
+  return {...existing,id:existing?.id||uid(),title:$('#titleInput').value.trim(),date:$('#dateInput').value,start:$('#startInput').value,end:$('#endInput').value,type:$('#typeInput').value,status:$('#statusInput').value,location:$('#locationInput').value.trim(),role:$('#roleInput').value.trim(),url:$('#urlInput').value.trim(),meetingId:$('#meetingIdInput').value.trim(),people:$('#peopleInput').value.trim(),notes:$('#notesInput').value.trim(),source:existing?.source||$('#sourceText').value,reminders:$('#remindersInput').value.split(/[,，]/).map(Number).filter(value=>Number.isFinite(value)&&value>=0),attachments:pendingFiles.length?pendingFiles.map(file=>file.name):(existing?.attachments||[]),createdAt:existing?.createdAt||new Date().toISOString(),updatedAt:new Date().toISOString()};
+}
+const normalizedMeetingId=value=>String(value||'').replace(/\D/g,'');
+const canonicalUrl=value=>String(value||'').replace(/[?#].*$/,'').replace(/\/$/,'');
+function findDuplicateEvent(candidate){
+  const meetingId=normalizedMeetingId(candidate.meetingId),url=canonicalUrl(candidate.url);
+  return events.find(item=>(meetingId&&meetingId===normalizedMeetingId(item.meetingId))||(url&&url===canonicalUrl(item.url))||(candidate.date&&candidate.date===item.date&&candidate.start&&candidate.start===item.start&&candidate.end&&candidate.end===item.end));
+}
+function joinUniqueText(first,second){return [...new Set([first,second].filter(Boolean).map(value=>String(value).trim()))].join('\n')}
+function mergeEvents(existing,incoming){
+  const generic=/^(?:待填写日程|出差\/外出安排|酒店住宿)$/;
+  const title=!existing.title||generic.test(existing.title)?incoming.title:existing.title;
+  return {...existing,title,date:existing.date||incoming.date,start:existing.start||incoming.start,end:existing.end||incoming.end,type:existing.type||incoming.type,status:existing.status==='已确认'||incoming.status==='已确认'?'已确认':(existing.status||incoming.status),location:existing.location||incoming.location,role:existing.role||incoming.role,url:existing.url||incoming.url,meetingId:existing.meetingId||incoming.meetingId,people:joinUniqueText(existing.people,incoming.people),notes:joinUniqueText(existing.notes,incoming.notes),source:joinUniqueText(existing.source,incoming.source),reminders:[...new Set([...(existing.reminders||[]),...(incoming.reminders||[])])],attachments:[...(existing.attachments||[]),...(incoming.attachments||[])],updatedAt:new Date().toISOString()};
 }
 function navigate(direction){
   if(viewMode==='month')cursorDate=new Date(cursorDate.getFullYear(),cursorDate.getMonth()+direction,1);
@@ -207,7 +220,7 @@ $('#closeEditorBtn').addEventListener('click',closeEditorDialog);
 $('#closeAttachmentPreview').addEventListener('click',closeAttachmentPreview);
 $('#photoInput').addEventListener('change',event=>{if(event.target.files?.length)recognizeFiles(event.target.files);else $('#ocrStatus').textContent='未选择文件。'});
 $('#recognizeBtn').addEventListener('click',()=>applyRecognizedText($('#sourceText').value));
-$('#editorForm').addEventListener('submit',async event=>{event.preventDefault();if(!$('#titleInput').value.trim()||!$('#dateInput').value)return;const index=events.findIndex(item=>item.id===editingId);const updated=eventFromForm(index>=0?events[index]:null);try{const stored=await storeAttachments(updated.id,pendingFiles);if(stored)updated.attachments=stored}catch{$('#ocrStatus').textContent='附件保存失败，请减少文件大小后重试。';return}if(index>=0)events[index]=updated;else events.push(updated);persist();closeEditorDialog();selectedDate=new Date(`${updated.date}T12:00:00`);cursorDate=new Date(selectedDate);render();if('Notification'in window&&Notification.permission==='default')Notification.requestPermission()});
+$('#editorForm').addEventListener('submit',async event=>{event.preventDefault();if(!$('#titleInput').value.trim()||!$('#dateInput').value)return;const index=events.findIndex(item=>item.id===editingId);let updated=eventFromForm(index>=0?events[index]:null),merged=false;const duplicate=index<0?findDuplicateEvent(updated):null;if(duplicate){updated.id=duplicate.id;merged=true}try{const stored=await storeAttachments(updated.id,pendingFiles);if(stored)updated.attachments=stored}catch{$('#ocrStatus').textContent='附件保存失败，请减少文件大小后重试。';return}if(index>=0)events[index]=updated;else if(duplicate){const duplicateIndex=events.findIndex(item=>item.id===duplicate.id);events[duplicateIndex]=updated=mergeEvents(duplicate,updated)}else events.push(updated);persist();closeEditorDialog();selectedDate=new Date(`${updated.date}T12:00:00`);cursorDate=new Date(selectedDate);render();if(merged)alert('已识别为同一会议，文字、截图和附件已合并。');if('Notification'in window&&Notification.permission==='default')Notification.requestPermission()});
 $('#deleteBtn').addEventListener('click',async()=>{if(!editingId||!confirm('确定删除这条日程吗？'))return;await deleteAttachments(editingId).catch(()=>{});events=events.filter(event=>event.id!==editingId);persist();closeEditorDialog();render()});
 $('#exportBtn').addEventListener('click',exportData);$('#restoreInput').addEventListener('change',event=>event.target.files[0]&&restoreData(event.target.files[0]));
 
