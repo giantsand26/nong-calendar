@@ -97,6 +97,7 @@ function parseSchedule(text){
   let location=(normalized.match(/(?:会议地点|地点)\s*:\s*([^\n]+)/)||[])[1]||'';
   const hotelAddress=lodging?((normalized.match(/(?:酒店地址|地址)\s*:\s*([^\n；;,，。]+)/)||[])[1]||''):'';
   if(lodging)location=hotelName||hotelAddress||location;
+  if(!location){location=(normalized.match(/在\s*([^，。\n]{1,40}?(?:医院|酒店|宾馆|饭店|大厦|会场|会议中心|中心|大学|学院|礼堂|展馆|报告厅|会议室))(?=的|那边|有|开会|[，。\n]|$)/)||[])[1]||''}
   if(!location){location=(normalized.match(/在([^，。\n]*?)(?:的会议|那边|有一个|开会)/)||[])[1]||''}
   if(trip&&!location)location=(normalized.match(/(苏州|北京|上海|广州|深圳|杭州|天津|南京|成都|重庆|武汉|西安|广西)/)||[''])[0];
   const role=lodging?'':(normalized.match(/讲者|讲课|主持|讨论|汇报|参会/)||[''])[0].replace('讲课','讲者');
