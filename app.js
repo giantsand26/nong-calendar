@@ -70,9 +70,17 @@ function normalizeChineseTime(raw, isAfternoon=false){
   if(isAfternoon&&hour<12)hour+=12;
   return `${pad(hour)}:${pad(minute)}`;
 }
+function formatTimeRange(start,end){
+  return start?`${start}${end?`–${end}`:''}`:'';
+}
+function parseTimeRangeInput(raw){
+  const match=String(raw||'').match(/(\d{1,2}):(\d{2})\s*[-–—至到]\s*(\d{1,2}):(\d{2})/);
+  if(!match)return ['',''];
+  return [`${pad(Number(match[1]))}:${match[2]}`,`${pad(Number(match[3]))}:${match[4]}`];
+}
 function normalizeRole(raw){
-  if(/讲者|讲课|授课|演讲|分享|汇报/.test(raw))return '讲者';
   if(/讨论|点评/.test(raw))return '讨论';
+  if(/讲者|讲课|授课|演讲|分享|汇报/.test(raw))return '讲者';
   if(/主持|主席/.test(raw))return '主持';
   if(/参会/.test(raw))return '参会';
   return '';
@@ -114,6 +122,27 @@ function inferPersonalRange(text,ranges,hasPersonalRole){
   }
   return nearest?.range||null;
 }
+function spatialAgendaHint(blocks){
+  const words=(blocks||[]).flatMap(block=>(block.paragraphs||[]).flatMap(paragraph=>(paragraph.lines||[]).flatMap(line=>line.words||[]))).filter(word=>word.text&&word.bbox);
+  if(!words.length)return '';
+  const sorted=[...words].sort((a,b)=>((a.bbox.y0+a.bbox.y1)-(b.bbox.y0+b.bbox.y1))||a.bbox.x0-b.bbox.x0),rows=[];
+  for(const word of sorted){
+    const y=(word.bbox.y0+word.bbox.y1)/2,height=word.bbox.y1-word.bbox.y0;
+    let row=rows.find(item=>Math.abs(item.y-y)<=Math.max(12,item.height*.7));
+    if(!row){row={y,height,words:[]};rows.push(row)}
+    row.words.push(word);row.y=(row.y*(row.words.length-1)+y)/row.words.length;row.height=Math.max(row.height,height);
+  }
+  rows.forEach(row=>{row.words.sort((a,b)=>a.bbox.x0-b.bbox.x0);row.text=row.words.map(word=>word.text).join('')});
+  const nameRow=rows.find(row=>/农[^\n，,。；;]{0,6}颖/.test(row.text));
+  if(!nameRow)return '';
+  const timeRows=rows.map(row=>({row,match:row.text.match(/(\d{1,2})[:：](\d{2})\s*[-–—至到]\s*(\d{1,2})[:：](\d{2})/)})).filter(item=>item.match);
+  if(!timeRows.length)return '';
+  const nearestTime=timeRows.sort((a,b)=>Math.abs(a.row.y-nameRow.y)-Math.abs(b.row.y-nameRow.y))[0];
+  const roleRows=rows.filter(row=>/分享与讨论|讨论嘉宾|讨论|讲者|讲课|授课|演讲|汇报/.test(row.text)).sort((a,b)=>Math.abs(a.y-nameRow.y)-Math.abs(b.y-nameRow.y));
+  const role=roleRows.length?normalizeRole(roleRows[0].text):'';
+  const [,h1,m1,h2,m2]=nearestTime.match;
+  return `我的环节时间:${h1}:${m1}-${h2}:${m2}\n本人姓名:农靖颖${role?`\n我的角色:${role}`:''}`;
+}
 function parseSchedule(text){
   const normalized=text.replace(/：/g,':').replace(/[–—]/g,'-')
     .replace(/(\d)\s+(?=\d|[年月日\/:.-])/g,'$1')
@@ -130,10 +159,12 @@ function parseSchedule(text){
   const date=parseDate(dateText);
   const afternoon=/下午/.test(normalized);
   const ranges=[...normalized.matchAll(/(\d{1,2}(?:点|:)\d{0,2})\s*(?:到|至|-)\s*(\d{1,2}(?:点|:)\d{0,2})/g)];
-  const role=inferPersonalRole(normalized);
+  const labeledPersonal=(normalized.match(/我的环节时间\s*:\s*(\d{1,2}:\d{2})\s*[-至到]\s*(\d{1,2}:\d{2})/)||[]);
+  const labeledRole=(normalized.match(/我的角色\s*:\s*(讲者|讨论|主持|参会)/)||[])[1]||'';
+  const role=labeledRole||inferPersonalRole(normalized);
   const hasPersonalRole=Boolean(role);
   const overall=ranges.length>1?ranges[0]:(!hasPersonalRole?ranges[0]:null);
-  const personal=inferPersonalRange(normalized,ranges,hasPersonalRole);
+  const personal=labeledPersonal.length?labeledPersonal:inferPersonalRange(normalized,ranges,hasPersonalRole);
   const start=overall?normalizeChineseTime(overall[1],afternoon):'';
   const end=overall?normalizeChineseTime(overall[2],afternoon):'';
   const personalStart=personal?normalizeChineseTime(personal[1],afternoon):'';
@@ -147,6 +178,7 @@ function parseSchedule(text){
   let location=(normalized.match(/(?:会议地点|地点)\s*:\s*([^\n]+)/)||[])[1]||'';
   const hotelAddress=lodging?((normalized.match(/(?:酒店地址|地址)\s*:\s*([^\n；;,，。]+)/)||[])[1]||''):'';
   if(lodging)location=hotelName||hotelAddress||location;
+  if(!location&&hasMeetingContext&&genericHotel)location=(genericHotel.match(/([一-龥A-Za-z]{2,30}(?:酒店|宾馆|饭店|客栈|旅馆|度假村|服务公寓))$/)||[])[1]||genericHotel;
   if(!location){location=(normalized.match(/在\s*([^，。\n]{1,40}?(?:医院|酒店|宾馆|饭店|大厦|会场|会议中心|中心|大学|学院|礼堂|展馆|报告厅|会议室))(?=的|那边|有|开会|[，。\n]|$)/)||[])[1]||''}
   if(!location){location=(normalized.match(/在([^，。\n]*?)(?:的会议|那边|有一个|开会)/)||[])[1]||''}
   if(trip&&!location)location=(normalized.match(/(苏州|北京|上海|广州|深圳|杭州|天津|南京|成都|重庆|武汉|西安|广西)/)||[''])[0];
@@ -190,8 +222,8 @@ function renderCalendar(){
 }
 function renderEvents(){
   $('#selectionTitle').textContent=`${selectedDate.getMonth()+1}月${selectedDate.getDate()}日 · 日程`;
-  const list=events.filter(event=>event.date===localDate(selectedDate)).sort((a,b)=>(a.start||a.personalStart||'99:99').localeCompare(b.start||b.personalStart||'99:99'));
-  $('#eventList').innerHTML=list.length?list.map(event=>{const overall=event.start?`会议 ${event.start}${event.end?'–'+event.end:''}`:'';const personal=event.personalStart?`我的环节 ${event.personalStart}${event.personalEnd?'–'+event.personalEnd:''}`:'';const timing=[overall,personal].filter(Boolean).join(' · ')||'时间待确认';return `<article class="event ${event.type==='出差/外出'?'trip':''}" data-id="${event.id}"><i class="event-dot"></i><div><h3>${escapeHTML(event.title)} <span class="badge">${escapeHTML(event.status)}</span></h3><p>${escapeHTML(timing)} · ${escapeHTML(event.location||'地点待确认')}${event.role?' · '+escapeHTML(event.role):''}</p></div></article>`}).join(''):'<div class="empty">暂无日程</div>';
+  const list=events.filter(event=>event.date===localDate(selectedDate)).sort((a,b)=>(a.personalStart||a.start||'99:99').localeCompare(b.personalStart||b.start||'99:99'));
+  $('#eventList').innerHTML=list.length?list.map(event=>{const personal=event.personalStart?`我的环节 ${formatTimeRange(event.personalStart,event.personalEnd)}`:'';const overall=event.start?`会议总时间 ${formatTimeRange(event.start,event.end)}`:'';const timing=[personal,overall].filter(Boolean).join(' · ')||'时间待确认';return `<article class="event ${event.type==='出差/外出'?'trip':''}" data-id="${event.id}"><i class="event-dot"></i><div><h3>${escapeHTML(event.title)} <span class="badge">${escapeHTML(event.status)}</span></h3><p>${escapeHTML(timing)} · ${escapeHTML(event.location||'地点待确认')}${event.role?' · '+escapeHTML(event.role):''}</p></div></article>`}).join(''):'<div class="empty">暂无日程</div>';
   document.querySelectorAll('.event').forEach(item=>item.addEventListener('click',()=>openEditor(events.find(event=>event.id===item.dataset.id))));
 }
 
@@ -200,7 +232,7 @@ function resetEditor(){
   fillFields({title:'',date:localDate(selectedDate),start:'',end:'',personalStart:'',personalEnd:'',type:'会议',status:'待确认',location:'',role:'',url:'',meetingId:'',people:'',notes:'',reminders:[1440,60,10],attachments:[]});
 }
 function fillFields(event){
-  $('#titleInput').value=event.title||'';$('#dateInput').value=event.date??localDate(selectedDate);$('#startInput').value=event.start||'';$('#endInput').value=event.end||'';$('#personalStartInput').value=event.personalStart||'';$('#personalEndInput').value=event.personalEnd||'';$('#typeInput').value=event.type||'会议';$('#statusInput').value=event.status||'待确认';$('#locationInput').value=event.location||'';$('#roleInput').value=event.role||'';$('#urlInput').value=event.url||'';$('#meetingIdInput').value=event.meetingId||'';$('#peopleInput').value=event.people||'';$('#notesInput').value=event.notes||'';$('#remindersInput').value=(event.reminders||[]).join(',');renderAttachments(event.attachments||[]);
+  $('#titleInput').value=event.title||'';$('#dateInput').value=event.date??localDate(selectedDate);$('#personalTimeInput').value=formatTimeRange(event.personalStart,event.personalEnd);$('#meetingTimeInput').value=formatTimeRange(event.start,event.end);$('#typeInput').value=event.type||'会议';$('#statusInput').value=event.status||'待确认';$('#locationInput').value=event.location||'';document.querySelectorAll('input[name="role"]').forEach(input=>{input.checked=String(event.role||'').split(/[、,\s]+/).includes(input.value)});$('#urlInput').value=event.url||'';$('#meetingIdInput').value=event.meetingId||'';$('#peopleInput').value=event.people||'';$('#notesInput').value=event.notes||'';$('#remindersInput').value=(event.reminders||[]).join(',');renderAttachments(event.attachments||[]);
 }
 function openEditor(event=null){
   resetEditor();
@@ -220,7 +252,12 @@ async function recognizeFiles(files){
   const outputs=[];
   for(let index=0;index<images.length;index++){
     $('#ocrStatus').textContent=`正在本地识别第 ${index+1}/${images.length} 张截图…`;
-    try{const result=await Tesseract.recognize(images[index],'chi_sim+eng',{logger:message=>{if(message.status==='recognizing text')$('#ocrStatus').textContent=`正在识别第 ${index+1}/${images.length} 张截图… ${Math.round((message.progress||0)*100)}%`}});outputs.push(result.data.text)}catch(error){console.error(error);outputs.push('')}
+    let worker;
+    try{
+      worker=await Tesseract.createWorker('chi_sim+eng',1,{logger:message=>{if(message.status==='recognizing text')$('#ocrStatus').textContent=`正在识别第 ${index+1}/${images.length} 张截图… ${Math.round((message.progress||0)*100)}%`}});
+      const result=await worker.recognize(images[index],{rotateAuto:true},{text:true,blocks:true});
+      outputs.push([result.data.text,spatialAgendaHint(result.data.blocks)].filter(Boolean).join('\n'));
+    }catch(error){console.error(error);outputs.push('')}finally{if(worker)await worker.terminate().catch(()=>{})}
   }
   $('#sourceText').value=[$('#sourceText').value,...outputs].filter(Boolean).join('\n\n');
   if(!outputs.some(text=>text.trim())){$('#ocrStatus').textContent='截图文字识别失败。请检查网络，或直接粘贴聊天文字。';return}
@@ -233,7 +270,9 @@ function applyRecognizedText(text,successMessage='已识别，请检查并修改
   catch(error){console.error(error);$('#ocrStatus').textContent='识别出错，请稍后重试或手动填写。';return false}
 }
 function eventFromForm(existing){
-  return {...existing,id:existing?.id||uid(),title:$('#titleInput').value.trim(),date:$('#dateInput').value,start:$('#startInput').value,end:$('#endInput').value,personalStart:$('#personalStartInput').value,personalEnd:$('#personalEndInput').value,type:$('#typeInput').value,status:$('#statusInput').value,location:$('#locationInput').value.trim(),role:$('#roleInput').value.trim(),url:$('#urlInput').value.trim(),meetingId:$('#meetingIdInput').value.trim(),people:$('#peopleInput').value.trim(),notes:$('#notesInput').value.trim(),source:existing?.source||$('#sourceText').value,reminders:$('#remindersInput').value.split(/[,，]/).map(Number).filter(value=>Number.isFinite(value)&&value>=0),attachments:pendingFiles.length?pendingFiles.map(file=>file.name):(existing?.attachments||[]),createdAt:existing?.createdAt||new Date().toISOString(),updatedAt:new Date().toISOString()};
+  const [personalStart,personalEnd]=parseTimeRangeInput($('#personalTimeInput').value),[start,end]=parseTimeRangeInput($('#meetingTimeInput').value);
+  const role=[...document.querySelectorAll('input[name="role"]:checked')].map(input=>input.value).join('、');
+  return {...existing,id:existing?.id||uid(),title:$('#titleInput').value.trim(),date:$('#dateInput').value,start,end,personalStart,personalEnd,type:$('#typeInput').value,status:$('#statusInput').value,location:$('#locationInput').value.trim(),role,url:$('#urlInput').value.trim(),meetingId:$('#meetingIdInput').value.trim(),people:$('#peopleInput').value.trim(),notes:$('#notesInput').value.trim(),source:existing?.source||$('#sourceText').value,reminders:$('#remindersInput').value.split(/[,，]/).map(Number).filter(value=>Number.isFinite(value)&&value>=0),attachments:pendingFiles.length?pendingFiles.map(file=>file.name):(existing?.attachments||[]),createdAt:existing?.createdAt||new Date().toISOString(),updatedAt:new Date().toISOString()};
 }
 const normalizedMeetingId=value=>String(value||'').replace(/\D/g,'');
 const canonicalUrl=value=>String(value||'').replace(/[?#].*$/,'').replace(/\/$/,'');
