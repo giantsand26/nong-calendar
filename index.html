@@ -76,6 +76,12 @@
     </form>
   </dialog>
 
+  <dialog id="attachmentPreviewDialog" class="preview-dialog">
+    <header class="dialog-head preview-head"><h2 id="attachmentPreviewTitle">附件预览</h2><button id="closeAttachmentPreview" type="button" class="close-button">关闭</button></header>
+    <div class="preview-body"><img id="attachmentPreviewImage" alt="附件图片"></div>
+    <footer class="preview-actions"><a id="downloadAttachment" class="primary" download>下载原图</a></footer>
+  </dialog>
+
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
   <script src="app.js"></script>
 </body>

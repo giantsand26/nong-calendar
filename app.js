@@ -29,7 +29,22 @@ async function storeAttachments(eventId,files){
 async function openAttachment(id){
   const database=await openAttachmentDB(),transaction=database.transaction('files','readonly'),request=transaction.objectStore('files').get(id);
   const record=await new Promise((resolve,reject)=>{request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error)});database.close();
-  if(!record)return alert('附件不存在或已被浏览器清理。');const url=URL.createObjectURL(record.blob),link=document.createElement('a');link.href=url;link.download=record.name;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+  if(!record)return alert('附件不存在或已被浏览器清理。');
+  const url=URL.createObjectURL(record.blob);
+  if(record.type?.startsWith('image/')){
+    const dialog=$('#attachmentPreviewDialog');
+    $('#attachmentPreviewTitle').textContent=record.name||'附件预览';$('#attachmentPreviewImage').src=url;
+    const download=$('#downloadAttachment');download.href=url;download.download=record.name||'附件图片';dialog.dataset.objectUrl=url;
+    if(typeof dialog.showModal==='function')dialog.showModal();else dialog.setAttribute('open','');
+    return;
+  }
+  const link=document.createElement('a');link.href=url;link.target='_blank';link.download=record.name;link.click();setTimeout(()=>URL.revokeObjectURL(url),60000);
+}
+function closeAttachmentPreview(){
+  const dialog=$('#attachmentPreviewDialog'),url=dialog.dataset.objectUrl;
+  if(typeof dialog.close==='function')dialog.close();else dialog.removeAttribute('open');
+  $('#attachmentPreviewImage').removeAttribute('src');$('#downloadAttachment').removeAttribute('href');delete dialog.dataset.objectUrl;
+  if(url)URL.revokeObjectURL(url);
 }
 async function deleteAttachments(eventId){
   const database=await openAttachmentDB(),transaction=database.transaction('files','readwrite'),store=transaction.objectStore('files'),request=store.openCursor();
@@ -185,6 +200,7 @@ document.querySelectorAll('.view-tabs button').forEach(button=>button.addEventLi
 $('#previousBtn').addEventListener('click',()=>navigate(-1));$('#nextBtn').addEventListener('click',()=>navigate(1));
 $('#addBtn').addEventListener('click',()=>openEditor());$('#importBtn').addEventListener('click',()=>openEditor());
 $('#closeEditorBtn').addEventListener('click',closeEditorDialog);
+$('#closeAttachmentPreview').addEventListener('click',closeAttachmentPreview);
 $('#photoInput').addEventListener('change',event=>{if(event.target.files?.length)recognizeFiles(event.target.files);else $('#ocrStatus').textContent='未选择文件。'});
 $('#recognizeBtn').addEventListener('click',()=>applyRecognizedText($('#sourceText').value));
 $('#editorForm').addEventListener('submit',async event=>{event.preventDefault();if(!$('#titleInput').value.trim()||!$('#dateInput').value)return;const index=events.findIndex(item=>item.id===editingId);const updated=eventFromForm(index>=0?events[index]:null);try{const stored=await storeAttachments(updated.id,pendingFiles);if(stored)updated.attachments=stored}catch{$('#ocrStatus').textContent='附件保存失败，请减少文件大小后重试。';return}if(index>=0)events[index]=updated;else events.push(updated);persist();closeEditorDialog();selectedDate=new Date(`${updated.date}T12:00:00`);cursorDate=new Date(selectedDate);render();if('Notification'in window&&Notification.permission==='default')Notification.requestPermission()});
