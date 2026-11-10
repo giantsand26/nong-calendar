@@ -77,27 +77,49 @@ function normalizeRole(raw){
   if(/参会/.test(raw))return '参会';
   return '';
 }
+function findPersonalAliases(text){
+  return [...text.matchAll(/农[\u4e00-\u9fa5]{0,4}颖|农(?:老师|主任|教授|姐姐)/g)];
+}
 function inferPersonalRole(text){
   const roleWords='讲者|讲课|授课|演讲|分享|汇报|讨论嘉宾|讨论|点评|主持人|主持|主席|参会';
   const explicit=text.match(new RegExp('(?:邀请|请)?您(?:担任|作为|进行|参与)?[^，。\\n]{0,12}?('+roleWords+')'))
-    ||text.match(new RegExp('(?:农老师|农主任|农教授|农姐姐)(?:担任|作为|进行|参与)?[^，。\\n]{0,12}?('+roleWords+')'));
+    ||text.match(new RegExp('(?:农[\\u4e00-\\u9fa5]{0,4}颖|农老师|农主任|农教授|农姐姐)(?:教授)?(?:担任|作为|进行|参与)[^，。\\n]{0,12}?('+roleWords+')'));
   if(explicit)return normalizeRole(explicit[1]);
-  const aliases=[...text.matchAll(/农老师|农主任|农教授|农姐姐/g)];
+  const aliases=findPersonalAliases(text);
   if(!aliases.length)return '';
   const roles=[...text.matchAll(new RegExp(roleWords,'g'))];
   if(!roles.length)return '';
+  for(const alias of aliases){
+    const rowStart=text.lastIndexOf('\n',alias.index-1)+1;
+    const beforeName=text.slice(rowStart,alias.index);
+    const rowRoles=[...beforeName.matchAll(new RegExp(roleWords,'g'))];
+    if(rowRoles.length)return normalizeRole(rowRoles[rowRoles.length-1][0]);
+  }
   let nearest=null;
   for(const alias of aliases)for(const role of roles){
-    const distance=Math.abs(role.index-alias.index);
-    if(distance<=18&&(!nearest||distance<nearest.distance))nearest={distance,word:role[0]};
+    if(role.index>alias.index)continue;
+    const distance=alias.index-role.index;
+    if(distance<=120&&(!nearest||distance<nearest.distance))nearest={distance,word:role[0]};
   }
   return nearest?normalizeRole(nearest.word):'';
+}
+function inferPersonalRange(text,ranges,hasPersonalRole){
+  if(!hasPersonalRole||!ranges.length)return null;
+  const aliases=findPersonalAliases(text);
+  if(!aliases.length)return ranges[ranges.length-1];
+  let nearest=null;
+  for(const alias of aliases)for(const range of ranges){
+    const distance=Math.abs(alias.index-(range.index+range[0].length));
+    if(distance<=180&&(!nearest||distance<nearest.distance))nearest={distance,range};
+  }
+  return nearest?.range||null;
 }
 function parseSchedule(text){
   const normalized=text.replace(/：/g,':').replace(/[–—]/g,'-')
     .replace(/(\d)\s+(?=\d|[年月日\/:.-])/g,'$1')
     .replace(/([年月日\/:.-])\s+(?=\d)/g,'$1');
-  const lodging=/酒店|宾馆|饭店|客栈|旅馆|入住|退房|离店|房型|预订号/.test(normalized);
+  const hasMeetingContext=/会议|议程|讲者|主持|讨论/.test(normalized);
+  const lodging=/入住|退房|离店|房型|预订号|酒店名称|住宿地点/.test(normalized)||(!hasMeetingContext&&/酒店|宾馆|饭店|客栈|旅馆/.test(normalized));
   const trip=lodging||/出差|外出|有空去|去吗/.test(normalized);
   const datePattern='(?:\\d{4}[年\\/-])?\\d{1,2}[月\\/-]\\d{1,2}日?';
   const dateMatches=[...normalized.matchAll(new RegExp(datePattern,'g'))];
@@ -111,7 +133,7 @@ function parseSchedule(text){
   const role=inferPersonalRole(normalized);
   const hasPersonalRole=Boolean(role);
   const overall=ranges.length>1?ranges[0]:(!hasPersonalRole?ranges[0]:null);
-  const personal=hasPersonalRole?ranges[ranges.length-1]:null;
+  const personal=inferPersonalRange(normalized,ranges,hasPersonalRole);
   const start=overall?normalizeChineseTime(overall[1],afternoon):'';
   const end=overall?normalizeChineseTime(overall[2],afternoon):'';
   const personalStart=personal?normalizeChineseTime(personal[1],afternoon):'';
