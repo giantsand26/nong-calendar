@@ -56,7 +56,9 @@ function normalizeChineseTime(raw, isAfternoon=false){
   return `${pad(hour)}:${pad(minute)}`;
 }
 function parseSchedule(text){
-  const normalized=text.replace(/：/g,':').replace(/[–—]/g,'-');
+  const normalized=text.replace(/：/g,':').replace(/[–—]/g,'-')
+    .replace(/(\d)\s+(?=\d|[年月日\/:.-])/g,'$1')
+    .replace(/([年月日\/:.-])\s+(?=\d)/g,'$1');
   const lodging=/酒店|宾馆|饭店|客栈|旅馆|入住|退房|离店|房型|预订号/.test(normalized);
   const trip=lodging||/出差|外出|有空去|去吗/.test(normalized);
   const dateMatches=[...normalized.matchAll(/(?:\d{4}[年\/-])?\d{1,2}[月\/-]\d{1,2}日?/g)].map(match=>match[0]);
