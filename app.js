@@ -70,6 +70,29 @@ function normalizeChineseTime(raw, isAfternoon=false){
   if(isAfternoon&&hour<12)hour+=12;
   return `${pad(hour)}:${pad(minute)}`;
 }
+function normalizeRole(raw){
+  if(/讲者|讲课|授课|演讲|分享|汇报/.test(raw))return '讲者';
+  if(/讨论|点评/.test(raw))return '讨论';
+  if(/主持|主席/.test(raw))return '主持';
+  if(/参会/.test(raw))return '参会';
+  return '';
+}
+function inferPersonalRole(text){
+  const roleWords='讲者|讲课|授课|演讲|分享|汇报|讨论嘉宾|讨论|点评|主持人|主持|主席|参会';
+  const explicit=text.match(new RegExp('(?:邀请|请)?您(?:担任|作为|进行|参与)?[^，。\\n]{0,12}?('+roleWords+')'))
+    ||text.match(new RegExp('(?:农老师|农主任|农教授|农姐姐)(?:担任|作为|进行|参与)?[^，。\\n]{0,12}?('+roleWords+')'));
+  if(explicit)return normalizeRole(explicit[1]);
+  const aliases=[...text.matchAll(/农老师|农主任|农教授|农姐姐/g)];
+  if(!aliases.length)return '';
+  const roles=[...text.matchAll(new RegExp(roleWords,'g'))];
+  if(!roles.length)return '';
+  let nearest=null;
+  for(const alias of aliases)for(const role of roles){
+    const distance=Math.abs(role.index-alias.index);
+    if(distance<=18&&(!nearest||distance<nearest.distance))nearest={distance,word:role[0]};
+  }
+  return nearest?normalizeRole(nearest.word):'';
+}
 function parseSchedule(text){
   const normalized=text.replace(/：/g,':').replace(/[–—]/g,'-')
     .replace(/(\d)\s+(?=\d|[年月日\/:.-])/g,'$1')
@@ -85,9 +108,14 @@ function parseSchedule(text){
   const date=parseDate(dateText);
   const afternoon=/下午/.test(normalized);
   const ranges=[...normalized.matchAll(/(\d{1,2}(?:点|:)\d{0,2})\s*(?:到|至|-)\s*(\d{1,2}(?:点|:)\d{0,2})/g)];
-  const personal=/讲者|讲课|主持|讨论|汇报/.test(normalized)&&ranges.length>1?ranges[ranges.length-1]:ranges[0];
-  const start=personal?normalizeChineseTime(personal[1],afternoon):'';
-  const end=personal?normalizeChineseTime(personal[2],afternoon):'';
+  const role=inferPersonalRole(normalized);
+  const hasPersonalRole=Boolean(role);
+  const overall=ranges.length>1?ranges[0]:(!hasPersonalRole?ranges[0]:null);
+  const personal=hasPersonalRole?ranges[ranges.length-1]:null;
+  const start=overall?normalizeChineseTime(overall[1],afternoon):'';
+  const end=overall?normalizeChineseTime(overall[2],afternoon):'';
+  const personalStart=personal?normalizeChineseTime(personal[1],afternoon):'';
+  const personalEnd=personal?normalizeChineseTime(personal[2],afternoon):'';
   const topic=(normalized.match(/会议主题\s*:\s*([^\n]+)/)||[])[1];
   const labeledHotel=(normalized.match(/(?:酒店名称|入住酒店|住宿地点) *:\s*([^\n，,。]{2,50})/)||[])[1]||'';
   const genericHotel=(normalized.match(/([^\n，,。；;]{2,50}?(?:酒店|宾馆|饭店|客栈|旅馆|度假村|服务公寓))/)||[])[1]||'';
@@ -100,7 +128,6 @@ function parseSchedule(text){
   if(!location){location=(normalized.match(/在\s*([^，。\n]{1,40}?(?:医院|酒店|宾馆|饭店|大厦|会场|会议中心|中心|大学|学院|礼堂|展馆|报告厅|会议室))(?=的|那边|有|开会|[，。\n]|$)/)||[])[1]||''}
   if(!location){location=(normalized.match(/在([^，。\n]*?)(?:的会议|那边|有一个|开会)/)||[])[1]||''}
   if(trip&&!location)location=(normalized.match(/(苏州|北京|上海|广州|深圳|杭州|天津|南京|成都|重庆|武汉|西安|广西)/)||[''])[0];
-  const role=lodging?'':(normalized.match(/讲者|讲课|主持|讨论|汇报|参会/)||[''])[0].replace('讲课','讲者');
   const url=(normalized.match(/https?:\/\/[^\s)]+/)||[''])[0];
   const meetingId=((normalized.match(/(?:腾讯会议|会议\s*(?:ID|号))\s*[#:]?\s*([\d-]{6,})/i)||[])[1]||'').replace(/^-|-$/g,'');
   const people=(normalized.match(/(?:主席|相关人员)\s*[:：]?\s*([^\n]+)/)||[])[1]||'';
@@ -109,7 +136,7 @@ function parseSchedule(text){
   const booking=(normalized.match(/(?:预订号|订单号|确认号)\s*:\s*([^\s\n，,]+)/)||[])[1]||'';
   const notes=lodging?[hotelAddress&&`酒店地址：${hotelAddress.trim()}`,checkout&&`退房/离店：${checkout}`,room&&`房型：${room.trim()}`,booking&&`预订号：${booking}`].filter(Boolean).join('\n'):'';
   const status=/预订成功|成功预订|已确认|确认成功|已预订/.test(normalized)?'已确认':'待确认';
-  return {id:uid(),title,date:date?localDate(date):'',start,end,type:trip?'出差/外出':'会议',status,location:location.trim(),role,people:people.trim(),url,meetingId,notes,source:text,reminders:[1440,60,10],attachments:[],createdAt:new Date().toISOString()};
+  return {id:uid(),title,date:date?localDate(date):'',start,end,personalStart,personalEnd,type:trip?'出差/外出':'会议',status,location:location.trim(),role,people:people.trim(),url,meetingId,notes,source:text,reminders:[1440,60,10],attachments:[],createdAt:new Date().toISOString()};
 }
 
 function render(){
@@ -141,17 +168,17 @@ function renderCalendar(){
 }
 function renderEvents(){
   $('#selectionTitle').textContent=`${selectedDate.getMonth()+1}月${selectedDate.getDate()}日 · 日程`;
-  const list=events.filter(event=>event.date===localDate(selectedDate)).sort((a,b)=>(a.start||'99:99').localeCompare(b.start||'99:99'));
-  $('#eventList').innerHTML=list.length?list.map(event=>`<article class="event ${event.type==='出差/外出'?'trip':''}" data-id="${event.id}"><i class="event-dot"></i><div><h3>${escapeHTML(event.title)} <span class="badge">${escapeHTML(event.status)}</span></h3><p>${escapeHTML(event.start?`${event.start}${event.end?'–'+event.end:''}`:'时间待确认')} · ${escapeHTML(event.location||'地点待确认')}${event.role?' · '+escapeHTML(event.role):''}</p></div></article>`).join(''):'<div class="empty">暂无日程</div>';
+  const list=events.filter(event=>event.date===localDate(selectedDate)).sort((a,b)=>(a.start||a.personalStart||'99:99').localeCompare(b.start||b.personalStart||'99:99'));
+  $('#eventList').innerHTML=list.length?list.map(event=>{const overall=event.start?`会议 ${event.start}${event.end?'–'+event.end:''}`:'';const personal=event.personalStart?`我的环节 ${event.personalStart}${event.personalEnd?'–'+event.personalEnd:''}`:'';const timing=[overall,personal].filter(Boolean).join(' · ')||'时间待确认';return `<article class="event ${event.type==='出差/外出'?'trip':''}" data-id="${event.id}"><i class="event-dot"></i><div><h3>${escapeHTML(event.title)} <span class="badge">${escapeHTML(event.status)}</span></h3><p>${escapeHTML(timing)} · ${escapeHTML(event.location||'地点待确认')}${event.role?' · '+escapeHTML(event.role):''}</p></div></article>`}).join(''):'<div class="empty">暂无日程</div>';
   document.querySelectorAll('.event').forEach(item=>item.addEventListener('click',()=>openEditor(events.find(event=>event.id===item.dataset.id))));
 }
 
 function resetEditor(){
   editingId=null;pendingFiles=[];$('#editorTitle').textContent='导入日程';$('#importSection').classList.remove('hidden');$('#deleteBtn').classList.add('hidden');$('#sourceText').value='';$('#ocrStatus').textContent='文字和附件只保存在此设备浏览器中。';
-  fillFields({title:'',date:localDate(selectedDate),start:'',end:'',type:'会议',status:'待确认',location:'',role:'',url:'',meetingId:'',people:'',notes:'',reminders:[1440,60,10],attachments:[]});
+  fillFields({title:'',date:localDate(selectedDate),start:'',end:'',personalStart:'',personalEnd:'',type:'会议',status:'待确认',location:'',role:'',url:'',meetingId:'',people:'',notes:'',reminders:[1440,60,10],attachments:[]});
 }
 function fillFields(event){
-  $('#titleInput').value=event.title||'';$('#dateInput').value=event.date??localDate(selectedDate);$('#startInput').value=event.start||'';$('#endInput').value=event.end||'';$('#typeInput').value=event.type||'会议';$('#statusInput').value=event.status||'待确认';$('#locationInput').value=event.location||'';$('#roleInput').value=event.role||'';$('#urlInput').value=event.url||'';$('#meetingIdInput').value=event.meetingId||'';$('#peopleInput').value=event.people||'';$('#notesInput').value=event.notes||'';$('#remindersInput').value=(event.reminders||[]).join(',');renderAttachments(event.attachments||[]);
+  $('#titleInput').value=event.title||'';$('#dateInput').value=event.date??localDate(selectedDate);$('#startInput').value=event.start||'';$('#endInput').value=event.end||'';$('#personalStartInput').value=event.personalStart||'';$('#personalEndInput').value=event.personalEnd||'';$('#typeInput').value=event.type||'会议';$('#statusInput').value=event.status||'待确认';$('#locationInput').value=event.location||'';$('#roleInput').value=event.role||'';$('#urlInput').value=event.url||'';$('#meetingIdInput').value=event.meetingId||'';$('#peopleInput').value=event.people||'';$('#notesInput').value=event.notes||'';$('#remindersInput').value=(event.reminders||[]).join(',');renderAttachments(event.attachments||[]);
 }
 function openEditor(event=null){
   resetEditor();
@@ -184,19 +211,19 @@ function applyRecognizedText(text,successMessage='已识别，请检查并修改
   catch(error){console.error(error);$('#ocrStatus').textContent='识别出错，请稍后重试或手动填写。';return false}
 }
 function eventFromForm(existing){
-  return {...existing,id:existing?.id||uid(),title:$('#titleInput').value.trim(),date:$('#dateInput').value,start:$('#startInput').value,end:$('#endInput').value,type:$('#typeInput').value,status:$('#statusInput').value,location:$('#locationInput').value.trim(),role:$('#roleInput').value.trim(),url:$('#urlInput').value.trim(),meetingId:$('#meetingIdInput').value.trim(),people:$('#peopleInput').value.trim(),notes:$('#notesInput').value.trim(),source:existing?.source||$('#sourceText').value,reminders:$('#remindersInput').value.split(/[,，]/).map(Number).filter(value=>Number.isFinite(value)&&value>=0),attachments:pendingFiles.length?pendingFiles.map(file=>file.name):(existing?.attachments||[]),createdAt:existing?.createdAt||new Date().toISOString(),updatedAt:new Date().toISOString()};
+  return {...existing,id:existing?.id||uid(),title:$('#titleInput').value.trim(),date:$('#dateInput').value,start:$('#startInput').value,end:$('#endInput').value,personalStart:$('#personalStartInput').value,personalEnd:$('#personalEndInput').value,type:$('#typeInput').value,status:$('#statusInput').value,location:$('#locationInput').value.trim(),role:$('#roleInput').value.trim(),url:$('#urlInput').value.trim(),meetingId:$('#meetingIdInput').value.trim(),people:$('#peopleInput').value.trim(),notes:$('#notesInput').value.trim(),source:existing?.source||$('#sourceText').value,reminders:$('#remindersInput').value.split(/[,，]/).map(Number).filter(value=>Number.isFinite(value)&&value>=0),attachments:pendingFiles.length?pendingFiles.map(file=>file.name):(existing?.attachments||[]),createdAt:existing?.createdAt||new Date().toISOString(),updatedAt:new Date().toISOString()};
 }
 const normalizedMeetingId=value=>String(value||'').replace(/\D/g,'');
 const canonicalUrl=value=>String(value||'').replace(/[?#].*$/,'').replace(/\/$/,'');
 function findDuplicateEvent(candidate){
   const meetingId=normalizedMeetingId(candidate.meetingId),url=canonicalUrl(candidate.url);
-  return events.find(item=>(meetingId&&meetingId===normalizedMeetingId(item.meetingId))||(url&&url===canonicalUrl(item.url))||(candidate.date&&candidate.date===item.date&&candidate.start&&candidate.start===item.start&&candidate.end&&candidate.end===item.end));
+  return events.find(item=>(meetingId&&meetingId===normalizedMeetingId(item.meetingId))||(url&&url===canonicalUrl(item.url))||(candidate.date&&candidate.date===item.date&&((candidate.start&&candidate.start===item.start&&candidate.end===item.end)||(candidate.personalStart&&candidate.personalStart===item.personalStart&&candidate.personalEnd===item.personalEnd))));
 }
 function joinUniqueText(first,second){return [...new Set([first,second].filter(Boolean).map(value=>String(value).trim()))].join('\n')}
 function mergeEvents(existing,incoming){
   const generic=/^(?:待填写日程|出差\/外出安排|酒店住宿)$/;
   const title=!existing.title||generic.test(existing.title)?incoming.title:existing.title;
-  return {...existing,title,date:existing.date||incoming.date,start:existing.start||incoming.start,end:existing.end||incoming.end,type:existing.type||incoming.type,status:existing.status==='已确认'||incoming.status==='已确认'?'已确认':(existing.status||incoming.status),location:existing.location||incoming.location,role:existing.role||incoming.role,url:existing.url||incoming.url,meetingId:existing.meetingId||incoming.meetingId,people:joinUniqueText(existing.people,incoming.people),notes:joinUniqueText(existing.notes,incoming.notes),source:joinUniqueText(existing.source,incoming.source),reminders:[...new Set([...(existing.reminders||[]),...(incoming.reminders||[])])],attachments:[...(existing.attachments||[]),...(incoming.attachments||[])],updatedAt:new Date().toISOString()};
+  return {...existing,title,date:existing.date||incoming.date,start:existing.start||incoming.start,end:existing.end||incoming.end,personalStart:existing.personalStart||incoming.personalStart,personalEnd:existing.personalEnd||incoming.personalEnd,type:existing.type||incoming.type,status:existing.status==='已确认'||incoming.status==='已确认'?'已确认':(existing.status||incoming.status),location:existing.location||incoming.location,role:joinUniqueText(existing.role,incoming.role).replace(/\n/g,'、'),url:existing.url||incoming.url,meetingId:existing.meetingId||incoming.meetingId,people:joinUniqueText(existing.people,incoming.people),notes:joinUniqueText(existing.notes,incoming.notes),source:joinUniqueText(existing.source,incoming.source),reminders:[...new Set([...(existing.reminders||[]),...(incoming.reminders||[])])],attachments:[...(existing.attachments||[]),...(incoming.attachments||[])],updatedAt:new Date().toISOString()};
 }
 function navigate(direction){
   if(viewMode==='month')cursorDate=new Date(cursorDate.getFullYear(),cursorDate.getMonth()+direction,1);
@@ -211,7 +238,7 @@ async function restoreData(file){
   try{const payload=JSON.parse(await file.text());if(!Array.isArray(payload.events))throw new Error();events=payload.events;persist();render();alert('备份已恢复')}catch{alert('备份文件无效')}
 }
 function checkReminders(){
-  const now=Date.now();events.forEach(event=>(event.reminders||[]).forEach(offset=>{if(!event.date||!event.start)return;const target=new Date(`${event.date}T${event.start}:00`).getTime()-offset*60000;if(Math.abs(target-now)<30000&&!sessionStorage.getItem(`${event.id}-${offset}`)){sessionStorage.setItem(`${event.id}-${offset}`,'1');if('Notification'in window&&Notification.permission==='granted')new Notification(event.title,{body:`${event.start} ${event.location||''}`})}}));
+  const now=Date.now();events.forEach(event=>(event.reminders||[]).forEach(offset=>{const reminderTime=event.personalStart||event.start;if(!event.date||!reminderTime)return;const target=new Date(`${event.date}T${reminderTime}:00`).getTime()-offset*60000;if(Math.abs(target-now)<30000&&!sessionStorage.getItem(`${event.id}-${offset}`)){sessionStorage.setItem(`${event.id}-${offset}`,'1');if('Notification'in window&&Notification.permission==='granted')new Notification(event.title,{body:`${reminderTime} ${event.location||''}`})}}));
 }
 
 document.querySelectorAll('.view-tabs button').forEach(button=>button.addEventListener('click',()=>{viewMode=button.dataset.view;render()}));
