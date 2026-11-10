@@ -129,16 +129,24 @@ function renderAttachments(items){
 }
 async function recognizeFiles(files){
   pendingFiles=[...files];renderAttachments(pendingFiles.map(file=>file.name));
+  $('#ocrStatus').textContent=`已选择 ${pendingFiles.length} 个文件，正在准备识别…`;
   const images=pendingFiles.filter(file=>file.type.startsWith('image/'));
   if(!images.length){$('#ocrStatus').textContent=`已选择 ${pendingFiles.length} 个附件。`;return}
   if(!window.Tesseract){$('#ocrStatus').textContent='OCR 模块未加载。附件仍可保存，请粘贴文字后识别。';return}
   const outputs=[];
   for(let index=0;index<images.length;index++){
     $('#ocrStatus').textContent=`正在本地识别第 ${index+1}/${images.length} 张截图…`;
-    try{const result=await Tesseract.recognize(images[index],'chi_sim+eng');outputs.push(result.data.text)}catch{outputs.push('')}
+    try{const result=await Tesseract.recognize(images[index],'chi_sim+eng',{logger:message=>{if(message.status==='recognizing text')$('#ocrStatus').textContent=`正在识别第 ${index+1}/${images.length} 张截图… ${Math.round((message.progress||0)*100)}%`}});outputs.push(result.data.text)}catch(error){console.error(error);outputs.push('')}
   }
   $('#sourceText').value=[$('#sourceText').value,...outputs].filter(Boolean).join('\n\n');
-  $('#ocrStatus').textContent=`已识别 ${images.length} 张截图，请检查文字后点击识别内容。`;
+  if(!outputs.some(text=>text.trim())){$('#ocrStatus').textContent='截图文字识别失败。请检查网络，或直接粘贴聊天文字。';return}
+  applyRecognizedText($('#sourceText').value,`已识别 ${images.length} 张截图，请检查下方日程。`);
+}
+function applyRecognizedText(text,successMessage='已识别，请检查并修改后保存。'){
+  const value=String(text||'').trim();
+  if(!value){$('#ocrStatus').textContent='请先粘贴文字或选择截图。';return false}
+  try{const draft=parseSchedule(value);draft.attachments=pendingFiles.map(file=>file.name);fillFields(draft);$('#ocrStatus').textContent=successMessage;$('#fields').scrollIntoView({behavior:'smooth',block:'start'});return true}
+  catch(error){console.error(error);$('#ocrStatus').textContent='识别出错，请稍后重试或手动填写。';return false}
 }
 function eventFromForm(existing){
   return {...existing,id:existing?.id||uid(),title:$('#titleInput').value.trim(),date:$('#dateInput').value,start:$('#startInput').value,end:$('#endInput').value,type:$('#typeInput').value,status:$('#statusInput').value,location:$('#locationInput').value.trim(),role:$('#roleInput').value.trim(),url:$('#urlInput').value.trim(),people:$('#peopleInput').value.trim(),notes:$('#notesInput').value.trim(),source:existing?.source||$('#sourceText').value,reminders:$('#remindersInput').value.split(/[,，]/).map(Number).filter(value=>Number.isFinite(value)&&value>=0),attachments:pendingFiles.length?pendingFiles.map(file=>file.name):(existing?.attachments||[]),createdAt:existing?.createdAt||new Date().toISOString(),updatedAt:new Date().toISOString()};
@@ -156,15 +164,15 @@ async function restoreData(file){
   try{const payload=JSON.parse(await file.text());if(!Array.isArray(payload.events))throw new Error();events=payload.events;persist();render();alert('备份已恢复')}catch{alert('备份文件无效')}
 }
 function checkReminders(){
-  const now=Date.now();events.forEach(event=>(event.reminders||[]).forEach(offset=>{if(!event.date||!event.start)return;const target=new Date(`${event.date}T${event.start}:00`).getTime()-offset*60000;if(Math.abs(target-now)<30000&&!sessionStorage.getItem(`${event.id}-${offset}`)){sessionStorage.setItem(`${event.id}-${offset}`,'1');if(Notification.permission==='granted')new Notification(event.title,{body:`${event.start} ${event.location||''}`})}}));
+  const now=Date.now();events.forEach(event=>(event.reminders||[]).forEach(offset=>{if(!event.date||!event.start)return;const target=new Date(`${event.date}T${event.start}:00`).getTime()-offset*60000;if(Math.abs(target-now)<30000&&!sessionStorage.getItem(`${event.id}-${offset}`)){sessionStorage.setItem(`${event.id}-${offset}`,'1');if('Notification'in window&&Notification.permission==='granted')new Notification(event.title,{body:`${event.start} ${event.location||''}`})}}));
 }
 
 document.querySelectorAll('.view-tabs button').forEach(button=>button.addEventListener('click',()=>{viewMode=button.dataset.view;render()}));
 $('#previousBtn').addEventListener('click',()=>navigate(-1));$('#nextBtn').addEventListener('click',()=>navigate(1));
 $('#addBtn').addEventListener('click',()=>openEditor());$('#importBtn').addEventListener('click',()=>openEditor());
 $('#closeEditorBtn').addEventListener('click',closeEditorDialog);
-$('#photoBtn').addEventListener('click',()=>$('#photoInput').click());$('#photoInput').addEventListener('change',event=>recognizeFiles(event.target.files));
-$('#recognizeBtn').addEventListener('click',()=>{const text=$('#sourceText').value.trim();if(!text){$('#ocrStatus').textContent='请先粘贴文字或选择截图。';return}const draft=parseSchedule(text);draft.attachments=pendingFiles.map(file=>file.name);fillFields(draft);$('#ocrStatus').textContent='已识别，请检查并修改后保存。'});
+$('#photoInput').addEventListener('change',event=>{if(event.target.files?.length)recognizeFiles(event.target.files);else $('#ocrStatus').textContent='未选择文件。'});
+$('#recognizeBtn').addEventListener('click',()=>applyRecognizedText($('#sourceText').value));
 $('#editorForm').addEventListener('submit',async event=>{event.preventDefault();if(!$('#titleInput').value.trim()||!$('#dateInput').value)return;const index=events.findIndex(item=>item.id===editingId);const updated=eventFromForm(index>=0?events[index]:null);try{const stored=await storeAttachments(updated.id,pendingFiles);if(stored)updated.attachments=stored}catch{$('#ocrStatus').textContent='附件保存失败，请减少文件大小后重试。';return}if(index>=0)events[index]=updated;else events.push(updated);persist();closeEditorDialog();selectedDate=new Date(`${updated.date}T12:00:00`);cursorDate=new Date(selectedDate);render();if('Notification'in window&&Notification.permission==='default')Notification.requestPermission()});
 $('#deleteBtn').addEventListener('click',async()=>{if(!editingId||!confirm('确定删除这条日程吗？'))return;await deleteAttachments(editingId).catch(()=>{});events=events.filter(event=>event.id!==editingId);persist();closeEditorDialog();render()});
 $('#exportBtn').addEventListener('click',exportData);$('#restoreInput').addEventListener('change',event=>event.target.files[0]&&restoreData(event.target.files[0]));

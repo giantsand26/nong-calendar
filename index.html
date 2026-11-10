@@ -54,11 +54,11 @@
       <section id="importSection">
         <textarea id="sourceText" placeholder="粘贴微信聊天内容，或选择微信截图"></textarea>
         <div class="actions">
-          <button id="photoBtn" type="button" class="secondary">选择截图/附件</button>
-          <input id="photoInput" type="file" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx" multiple hidden>
+          <label id="photoBtn" class="secondary file-button" for="photoInput">选择截图/附件</label>
+          <input id="photoInput" class="visually-hidden" type="file" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx" multiple>
           <button id="recognizeBtn" type="button" class="primary">识别内容</button>
         </div>
-        <p id="ocrStatus" class="hint">文字和附件只保存在此设备浏览器中。</p>
+        <p id="ocrStatus" class="hint" role="status" aria-live="polite">文字和附件只保存在此设备浏览器中。</p>
       </section>
       <section id="fields" class="fields">
         <label>标题<input id="titleInput" required></label>
