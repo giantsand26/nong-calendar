@@ -133,13 +133,23 @@ function spatialAgendaHint(blocks){
     row.words.push(word);row.y=(row.y*(row.words.length-1)+y)/row.words.length;row.height=Math.max(row.height,height);
   }
   rows.forEach(row=>{row.words.sort((a,b)=>a.bbox.x0-b.bbox.x0);row.text=row.words.map(word=>word.text).join('')});
-  const nameRow=rows.find(row=>/农[^\n，,。；;]{0,6}颖/.test(row.text));
+  const namePattern=/农[^\n，,。；;]{0,6}颖/;
+  const nameRow=rows.find(row=>namePattern.test(row.text));
   if(!nameRow)return '';
+  const nameMatch=nameRow.text.match(namePattern),nameStart=nameMatch?.index||0,nameEnd=nameStart+(nameMatch?.[0].length||0);
+  let characterOffset=0;
+  const nameWords=nameRow.words.filter(word=>{const start=characterOffset,end=start+word.text.length;characterOffset=end;return end>nameStart&&start<nameEnd});
+  const nameX=nameWords.length?nameWords.reduce((sum,word)=>sum+(word.bbox.x0+word.bbox.x1)/2,0)/nameWords.length:nameRow.words.reduce((sum,word)=>sum+(word.bbox.x0+word.bbox.x1)/2,0)/nameRow.words.length;
   const timeRows=rows.map(row=>({row,match:row.text.match(/(\d{1,2})[:：](\d{2})\s*[-–—至到]\s*(\d{1,2})[:：](\d{2})/)})).filter(item=>item.match);
   if(!timeRows.length)return '';
-  const nearestTime=timeRows.sort((a,b)=>Math.abs(a.row.y-nameRow.y)-Math.abs(b.row.y-nameRow.y))[0];
+  const precedingTimes=timeRows.filter(item=>item.row.y<=nameRow.y+12);
+  const nearestTime=(precedingTimes.length?precedingTimes.sort((a,b)=>b.row.y-a.row.y):timeRows.sort((a,b)=>Math.abs(a.row.y-nameRow.y)-Math.abs(b.row.y-nameRow.y)))[0];
+  const headerWords=rows.flatMap(row=>row.words).filter(word=>/^讲\s*者$|^主\s*持$/.test(word.text));
+  const speakerHeader=headerWords.find(word=>/讲/.test(word.text)),hostHeader=headerWords.find(word=>/主/.test(word.text));
+  const center=word=>(word.bbox.x0+word.bbox.x1)/2;
+  const inHostColumn=hostHeader&&(!speakerHeader||Math.abs(nameX-center(hostHeader))<Math.abs(nameX-center(speakerHeader)));
   const roleRows=rows.filter(row=>/分享与讨论|讨论嘉宾|讨论|讲者|讲课|授课|演讲|汇报/.test(row.text)).sort((a,b)=>Math.abs(a.y-nameRow.y)-Math.abs(b.y-nameRow.y));
-  const role=roleRows.length?normalizeRole(roleRows[0].text):'';
+  const role=inHostColumn?'主持':(roleRows.length?normalizeRole(roleRows[0].text):'');
   const [,h1,m1,h2,m2]=nearestTime.match;
   return `我的环节时间:${h1}:${m1}-${h2}:${m2}\n本人姓名:农靖颖${role?`\n我的角色:${role}`:''}`;
 }
