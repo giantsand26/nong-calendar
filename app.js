@@ -324,4 +324,8 @@ $('#deleteBtn').addEventListener('click',async()=>{if(!editingId||!confirm('ç¡®å
 $('#exportBtn').addEventListener('click',exportData);$('#restoreInput').addEventListener('change',event=>event.target.files[0]&&restoreData(event.target.files[0]));
 
 render();setInterval(checkReminders,30000);checkReminders();
-if('serviceWorker'in navigator)navigator.serviceWorker.register('./sw.js').catch(()=>{});
+if('serviceWorker'in navigator){
+  let refreshing=false;
+  navigator.serviceWorker.addEventListener('controllerchange',()=>{if(refreshing)return;refreshing=true;location.reload()});
+  navigator.serviceWorker.register('./sw.js',{updateViaCache:'none'}).then(registration=>registration.update()).catch(()=>{});
+}
