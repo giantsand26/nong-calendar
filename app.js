@@ -78,6 +78,31 @@ function parseTimeRangeInput(raw){
   if(!match)return ['',''];
   return [`${pad(Number(match[1]))}:${match[2]}`,`${pad(Number(match[3]))}:${match[4]}`];
 }
+function extractAgendaCandidates(text){
+  const normalized=String(text||'').replace(/：/g,':').replace(/[–—]/g,'-');
+  const matches=[...normalized.matchAll(/(\d{1,2}):(\d{2})\s*[-至到]\s*(\d{1,2}):(\d{2})/g)],seen=new Set(),items=[];
+  for(const match of matches){
+    const range=`${pad(Number(match[1]))}:${match[2]}–${pad(Number(match[3]))}:${match[4]}`;
+    if(seen.has(range))continue;
+    seen.add(range);
+    const nearby=normalized.slice(match.index+match[0].length,match.index+match[0].length+90).split(/\n/).map(value=>value.trim()).find(Boolean)||'';
+    const label=nearby.replace(/\s+/g,' ').replace(/^[|｜:：,，;；-]+/,'').slice(0,28);
+    items.push({range,label,role:normalizeRole(label)});
+  }
+  return items;
+}
+function renderAgendaCandidates(text){
+  const host=$('#agendaCandidates'),items=extractAgendaCandidates(text);
+  if(!items.length){host.innerHTML='';host.classList.add('hidden');return}
+  host.classList.remove('hidden');
+  host.innerHTML=`<strong>图片中的时间段（可点选我的环节）</strong><div class="candidate-list">${items.map(item=>`<button type="button" data-agenda-range="${item.range}" data-agenda-role="${item.role}"><b>${item.range}</b>${item.label?`<span>${escapeHTML(item.label)}</span>`:''}</button>`).join('')}</div>`;
+  host.querySelectorAll('[data-agenda-range]').forEach(button=>button.addEventListener('click',()=>{
+    $('#personalTimeInput').value=button.dataset.agendaRange;
+    if(button.dataset.agendaRole)document.querySelectorAll('input[name="role"]').forEach(input=>{input.checked=input.value===button.dataset.agendaRole});
+    host.querySelectorAll('button').forEach(item=>item.classList.toggle('selected',item===button));
+    $('#ocrStatus').textContent=`已选择我的环节：${button.dataset.agendaRange}`;
+  }));
+}
 function normalizeRole(raw){
   if(/讨论|点评/.test(raw))return '讨论';
   if(/讲者|讲课|授课|演讲|分享|汇报/.test(raw))return '讲者';
@@ -238,7 +263,7 @@ function renderEvents(){
 }
 
 function resetEditor(){
-  editingId=null;pendingFiles=[];$('#editorTitle').textContent='导入日程';$('#importSection').classList.remove('hidden');$('#deleteBtn').classList.add('hidden');$('#sourceText').value='';$('#ocrStatus').textContent='文字和附件只保存在此设备浏览器中。';
+  editingId=null;pendingFiles=[];$('#editorTitle').textContent='导入日程';$('#importSection').classList.remove('hidden');$('#deleteBtn').classList.add('hidden');$('#sourceText').value='';$('#ocrStatus').textContent='文字和附件只保存在此设备浏览器中。';renderAgendaCandidates('');
   fillFields({title:'',date:localDate(selectedDate),start:'',end:'',personalStart:'',personalEnd:'',type:'会议',status:'待确认',location:'',role:'',url:'',meetingId:'',people:'',notes:'',reminders:[1440,60,10],attachments:[]});
 }
 function fillFields(event){
@@ -276,7 +301,7 @@ async function recognizeFiles(files){
 function applyRecognizedText(text,successMessage='已识别，请检查并修改后保存。'){
   const value=String(text||'').trim();
   if(!value){$('#ocrStatus').textContent='请先粘贴文字或选择截图。';return false}
-  try{const draft=parseSchedule(value);draft.attachments=pendingFiles.map(file=>file.name);fillFields(draft);$('#ocrStatus').textContent=draft.date?successMessage:'未能确定日期，请手动选择日期后再保存。';$('#fields').scrollIntoView({behavior:'smooth',block:'start'});return true}
+  try{const draft=parseSchedule(value);draft.attachments=pendingFiles.map(file=>file.name);fillFields(draft);renderAgendaCandidates(value);$('#ocrStatus').textContent=draft.date?successMessage:'未能确定日期，请手动选择日期后再保存。';$('#fields').scrollIntoView({behavior:'smooth',block:'start'});return true}
   catch(error){console.error(error);$('#ocrStatus').textContent='识别出错，请稍后重试或手动填写。';return false}
 }
 function eventFromForm(existing){
