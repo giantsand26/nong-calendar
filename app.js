@@ -78,6 +78,10 @@ function parseTimeRangeInput(raw){
   if(!match)return ['',''];
   return [`${pad(Number(match[1]))}:${match[2]}`,`${pad(Number(match[3]))}:${match[4]}`];
 }
+function parseSingleTimeInput(raw){
+  const match=String(raw||'').match(/(\d{1,2}):(\d{2})/);
+  return match?`${pad(Number(match[1]))}:${match[2]}`:'';
+}
 function extractAgendaCandidates(text){
   const normalized=String(text||'').replace(/：/g,':').replace(/[–—]/g,'-');
   const matches=[...normalized.matchAll(/(\d{1,2}):(\d{2})\s*[-至到]\s*(\d{1,2}):(\d{2})/g)],seen=new Set(),items=[];
@@ -111,11 +115,11 @@ function normalizeRole(raw){
   return '';
 }
 function findPersonalAliases(text){
-  return [...text.matchAll(/农[\u4e00-\u9fa5]{0,4}颖|农(?:老师|主任|教授|姐姐)/g)];
+  return [...text.matchAll(/农(?:[\s一-龥]{0,10})颖|农\s*(?:老师|主任|教授|姐姐)/g)];
 }
 function inferPersonalRole(text){
   const roleWords='讲者|讲课|授课|演讲|分享|汇报|讨论嘉宾|讨论|点评|主持人|主持|主席|参会';
-  const explicit=text.match(new RegExp('(?:邀请|请)?您(?:担任|作为|进行|参与)?[^，。\\n]{0,12}?('+roleWords+')'))
+  const explicit=text.match(new RegExp('(?:邀请|请)?您(?:担任|作为|进行|参与|做)?[^，。\\n]{0,40}?('+roleWords+')'))
     ||text.match(new RegExp('(?:农[\\u4e00-\\u9fa5]{0,4}颖|农老师|农主任|农教授|农姐姐)(?:教授)?(?:担任|作为|进行|参与)[^，。\\n]{0,12}?('+roleWords+')'));
   if(explicit)return normalizeRole(explicit[1]);
   const aliases=findPersonalAliases(text);
@@ -137,9 +141,23 @@ function inferPersonalRole(text){
   return nearest?normalizeRole(nearest.word):'';
 }
 function inferPersonalRange(text,ranges,hasPersonalRole){
-  if(!hasPersonalRole||!ranges.length)return null;
+  if(!ranges.length)return null;
+  const addressed=[...text.matchAll(/(?:邀请|请)?您(?:担任|作为|进行|参与|做)?/g)];
+  for(const cue of addressed){
+    const following=ranges.find(range=>range.index>=cue.index&&range.index-cue.index<=80);
+    if(following)return following;
+  }
   const aliases=findPersonalAliases(text);
-  if(!aliases.length)return ranges[ranges.length-1];
+  if(!aliases.length){
+    const explicitlyAddressed=ranges.find(range=>/(?:邀请|请)?您(?:担任|作为|进行|参与|做)?/.test(text.slice(Math.max(0,range.index-70),range.index+range[0].length+70)));
+    return explicitlyAddressed||null;
+  }
+  // 议程图表中，时间通常是一行的起点，姓名可能被 OCR 拆到后续多行。
+  // 先在每个时间段到下一时间段的区间内找“农…颖”，避免被相邻行距离误导。
+  for(let index=0;index<ranges.length;index++){
+    const range=ranges[index],sectionStart=range.index,sectionEnd=ranges[index+1]?.index??text.length;
+    if(aliases.some(alias=>alias.index>=sectionStart&&alias.index<sectionEnd))return range;
+  }
   let nearest=null;
   for(const alias of aliases)for(const range of ranges){
     const distance=Math.abs(alias.index-(range.index+range[0].length));
@@ -158,7 +176,7 @@ function spatialAgendaHint(blocks){
     row.words.push(word);row.y=(row.y*(row.words.length-1)+y)/row.words.length;row.height=Math.max(row.height,height);
   }
   rows.forEach(row=>{row.words.sort((a,b)=>a.bbox.x0-b.bbox.x0);row.text=row.words.map(word=>word.text).join('')});
-  const namePattern=/农[^\n，,。；;]{0,6}颖/;
+  const namePattern=/农(?:[\s一-龥]{0,10})颖/;
   const nameRow=rows.find(row=>namePattern.test(row.text));
   if(!nameRow)return '';
   const nameMatch=nameRow.text.match(namePattern),nameStart=nameMatch?.index||0,nameEnd=nameStart+(nameMatch?.[0].length||0);
@@ -201,7 +219,7 @@ function parseSchedule(text){
   const overall=ranges.length>1?ranges[0]:(!hasPersonalRole?ranges[0]:null);
   const personal=labeledPersonal.length?labeledPersonal:inferPersonalRange(normalized,ranges,hasPersonalRole);
   const start=overall?normalizeChineseTime(overall[1],afternoon):'';
-  const end=overall?normalizeChineseTime(overall[2],afternoon):'';
+  const end='';
   const personalStart=personal?normalizeChineseTime(personal[1],afternoon):'';
   const personalEnd=personal?normalizeChineseTime(personal[2],afternoon):'';
   const topic=(normalized.match(/会议主题\s*:\s*([^\n]+)/)||[])[1];
@@ -258,7 +276,7 @@ function renderCalendar(){
 function renderEvents(){
   $('#selectionTitle').textContent=`${selectedDate.getMonth()+1}月${selectedDate.getDate()}日 · 日程`;
   const list=events.filter(event=>event.date===localDate(selectedDate)).sort((a,b)=>(a.personalStart||a.start||'99:99').localeCompare(b.personalStart||b.start||'99:99'));
-  $('#eventList').innerHTML=list.length?list.map(event=>{const personal=event.personalStart?`我的环节 ${formatTimeRange(event.personalStart,event.personalEnd)}`:'';const overall=event.start?`会议总时间 ${formatTimeRange(event.start,event.end)}`:'';const timing=[personal,overall].filter(Boolean).join(' · ')||'时间待确认';return `<article class="event ${event.type==='出差/外出'?'trip':''}" data-id="${event.id}"><i class="event-dot"></i><div><h3>${escapeHTML(event.title)} <span class="badge">${escapeHTML(event.status)}</span></h3><p>${escapeHTML(timing)} · ${escapeHTML(event.location||'地点待确认')}${event.role?' · '+escapeHTML(event.role):''}</p></div></article>`}).join(''):'<div class="empty">暂无日程</div>';
+  $('#eventList').innerHTML=list.length?list.map(event=>{const personal=event.personalStart?`我的环节 ${formatTimeRange(event.personalStart,event.personalEnd)}`:'';const overall=event.start?`会议开始 ${event.start}`:'';const timing=[personal,overall].filter(Boolean).join(' · ')||'时间待确认';return `<article class="event ${event.type==='出差/外出'?'trip':''}" data-id="${event.id}"><i class="event-dot"></i><div><h3>${escapeHTML(event.title)} <span class="badge">${escapeHTML(event.status)}</span></h3><p>${escapeHTML(timing)} · ${escapeHTML(event.location||'地点待确认')}${event.role?' · '+escapeHTML(event.role):''}</p></div></article>`}).join(''):'<div class="empty">暂无日程</div>';
   document.querySelectorAll('.event').forEach(item=>item.addEventListener('click',()=>openEditor(events.find(event=>event.id===item.dataset.id))));
 }
 
@@ -267,7 +285,7 @@ function resetEditor(){
   fillFields({title:'',date:localDate(selectedDate),start:'',end:'',personalStart:'',personalEnd:'',type:'会议',status:'待确认',location:'',role:'',url:'',meetingId:'',people:'',notes:'',reminders:[1440,60,10],attachments:[]});
 }
 function fillFields(event){
-  $('#titleInput').value=event.title||'';$('#dateInput').value=event.date??localDate(selectedDate);$('#personalTimeInput').value=formatTimeRange(event.personalStart,event.personalEnd);$('#meetingTimeInput').value=formatTimeRange(event.start,event.end);$('#typeInput').value=event.type||'会议';$('#statusInput').value=event.status||'待确认';$('#locationInput').value=event.location||'';document.querySelectorAll('input[name="role"]').forEach(input=>{input.checked=String(event.role||'').split(/[、,\s]+/).includes(input.value)});$('#urlInput').value=event.url||'';$('#meetingIdInput').value=event.meetingId||'';$('#peopleInput').value=event.people||'';$('#notesInput').value=event.notes||'';$('#remindersInput').value=(event.reminders||[]).join(',');renderAttachments(event.attachments||[]);
+  $('#titleInput').value=event.title||'';$('#dateInput').value=event.date??localDate(selectedDate);$('#personalTimeInput').value=formatTimeRange(event.personalStart,event.personalEnd);$('#meetingTimeInput').value=event.start||'';$('#typeInput').value=event.type||'会议';$('#statusInput').value=event.status||'待确认';$('#locationInput').value=event.location||'';document.querySelectorAll('input[name="role"]').forEach(input=>{input.checked=String(event.role||'').split(/[、,\s]+/).includes(input.value)});$('#urlInput').value=event.url||'';$('#meetingIdInput').value=event.meetingId||'';$('#peopleInput').value=event.people||'';$('#notesInput').value=event.notes||'';$('#remindersInput').value=(event.reminders||[]).join(',');renderAttachments(event.attachments||[]);
 }
 function openEditor(event=null){
   resetEditor();
@@ -305,7 +323,7 @@ function applyRecognizedText(text,successMessage='已识别，请检查并修改
   catch(error){console.error(error);$('#ocrStatus').textContent='识别出错，请稍后重试或手动填写。';return false}
 }
 function eventFromForm(existing){
-  const [personalStart,personalEnd]=parseTimeRangeInput($('#personalTimeInput').value),[start,end]=parseTimeRangeInput($('#meetingTimeInput').value);
+  const [personalStart,personalEnd]=parseTimeRangeInput($('#personalTimeInput').value),start=parseSingleTimeInput($('#meetingTimeInput').value),end='';
   const role=[...document.querySelectorAll('input[name="role"]:checked')].map(input=>input.value).join('、');
   return {...existing,id:existing?.id||uid(),title:$('#titleInput').value.trim(),date:$('#dateInput').value,start,end,personalStart,personalEnd,type:$('#typeInput').value,status:$('#statusInput').value,location:$('#locationInput').value.trim(),role,url:$('#urlInput').value.trim(),meetingId:$('#meetingIdInput').value.trim(),people:$('#peopleInput').value.trim(),notes:$('#notesInput').value.trim(),source:existing?.source||$('#sourceText').value,reminders:$('#remindersInput').value.split(/[,，]/).map(Number).filter(value=>Number.isFinite(value)&&value>=0),attachments:pendingFiles.length?pendingFiles.map(file=>file.name):(existing?.attachments||[]),createdAt:existing?.createdAt||new Date().toISOString(),updatedAt:new Date().toISOString()};
 }

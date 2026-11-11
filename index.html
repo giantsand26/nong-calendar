@@ -9,14 +9,14 @@
   <link rel="manifest" href="manifest.json">
   <link rel="icon" href="icon-192.png" type="image/png">
   <link rel="apple-touch-icon" href="apple-touch-icon.png">
-  <link rel="stylesheet" href="styles.css?v=20">
+  <link rel="stylesheet" href="styles.css?v=21">
   <title>农的日程</title>
 </head>
 <body>
   <main class="app">
     <header class="topbar">
       <div><h1>我的日程</h1><p id="todayLabel"></p></div>
-      <div class="top-actions"><small class="build-version">v20</small><button id="addBtn" class="icon-button" aria-label="新建日程">＋</button></div>
+      <div class="top-actions"><small class="build-version">v21</small><button id="addBtn" class="icon-button" aria-label="新建日程">＋</button></div>
     </header>
 
     <nav class="view-tabs" aria-label="日历视图">
@@ -65,7 +65,7 @@
         <label>标题<input id="titleInput" required></label>
         <div class="two-column"><label>日期<input id="dateInput" type="date" required></label><label>状态<select id="statusInput"><option>待确认</option><option>已确认</option><option>已取消</option></select></label></div>
         <label>我的环节时间<input id="personalTimeInput" placeholder="17:30–17:50"></label>
-        <label>会议总时间<input id="meetingTimeInput" placeholder="16:00–18:00"></label>
+        <label>会议开始时间<input id="meetingTimeInput" placeholder="16:00" inputmode="numeric"></label>
         <div class="two-column"><label>类型<select id="typeInput"><option>会议</option><option>出差/外出</option><option>其他</option></select></label><fieldset class="role-field"><legend>我的角色</legend><div class="role-options"><label><input type="checkbox" name="role" value="讲者">讲者</label><label><input type="checkbox" name="role" value="讨论">讨论</label><label><input type="checkbox" name="role" value="主持">主持</label></div></fieldset></div>
         <label>地点<input id="locationInput"></label>
         <div class="two-column"><label>会议链接<input id="urlInput" type="url"></label><label>会议号<input id="meetingIdInput" placeholder="692-195-665"></label></div>
@@ -85,6 +85,6 @@
   </dialog>
 
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-  <script src="app.js?v=20"></script>
+  <script src="app.js?v=21"></script>
 </body>
 </html>
